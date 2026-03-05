@@ -9,5 +9,7 @@ Lightweight keyboard-driven highlighter for macOS Safari
 
 ### Shortcuts
 **H** — Highlight selection (Hold to cycle colors)
+
 **R** — Remove last highlight
+
 **C** — Copy all highlights to clipboard
