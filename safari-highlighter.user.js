@@ -184,11 +184,14 @@
     };
 
     const copyHighlights = () => {
-        const fullText = history
+        let fullText = history
             .map(batch => batch.filter(span => document.body.contains(span)).map(span => span.textContent).join(''))
             .filter(text => text.trim().length > 0)
-            .join('\n\n');
+            .join('\n'); // Changed from '\n\n' to avoid empty lines between batches
         
+        // Removes empty lines that may have been captured within the highlighted text itself
+        fullText = fullText.replace(/\n\s*\n/g, '\n');
+
         if (!fullText) return;
         
         navigator.clipboard.writeText(fullText).then(() => {
