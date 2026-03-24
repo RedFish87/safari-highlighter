@@ -1,14 +1,14 @@
 // ==UserScript==
 // @name         Safari Highlighter
-// @version      1.1.0
-// @description  Color Palette Update
+// @version      1.2.0
+// @description  LocalStorage Persistence
 // @match        *://*/*
 // @grant        none
 // ==/UserScript==
 
 /* CHANGE LOG:
-  1.1.0 - Updated colors to Yellow, Green, Red, Orange with improved hex codes.
-  1.0.0 - Initial stable release.
+  1.2.0 - Added LocalStorage support to persist highlights across sessions.
+  1.1.0 - Updated colors to Yellow, Green, Red, Orange.
 */
 
 (function() {
@@ -28,18 +28,54 @@
     let isCycling = false;
     let hKeyDown = false;
 
+    const STORAGE_KEY = 'safari_hl_data_' + window.location.hostname;
+
+    const saveToStorage = () => {
+        const data = history.map(batch => {
+            return {
+                text: batch[0]?.textContent || '',
+                color: batch[0]?.style.getPropertyValue('--hl-color')
+            };
+        });
+        localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
+    };
+
+    const applyHighlightToText = (targetText, color, save = true) => {
+        const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT, null, false);
+        let node;
+        const batch = [];
+        while (node = walker.nextNode()) {
+            const index = node.textContent.indexOf(targetText);
+            if (index !== -1 && !node.parentNode.classList.contains('safari-hl')) {
+                const highlightNode = node.splitText(index);
+                highlightNode.splitText(targetText.length);
+                const span = document.createElement('span');
+                span.className = 'safari-hl';
+                span.style.setProperty('--hl-color', color);
+                highlightNode.parentNode.insertBefore(span, highlightNode);
+                span.appendChild(highlightNode);
+                batch.push(span);
+            }
+        }
+        if (batch.length > 0) { history.push(batch); if (save) saveToStorage(); }
+    };
+
+    const restoreHighlights = () => {
+        const saved = localStorage.getItem(STORAGE_KEY);
+        if (!saved) return;
+        const highlightedData = JSON.parse(saved);
+        highlightedData.forEach(item => { if (item.text) applyHighlightToText(item.text, item.color, false); });
+    };
+
     const styleId = 'safari-highlighter-styles';
     if (!document.getElementById(styleId)) {
-        const css = `
-            .safari-hl { color: #000 !important; background-color: var(--hl-color) !important; display: inline !important; position: relative; z-index: 10; }
-            .hl-toast { position: fixed; top: 40px; left: 50%; transform: translateX(-50%); background: #1d1d1f; color: white; padding: 10px 20px; border-radius: 25px; font-family: -apple-system; font-size: 14px; z-index: 9999999; opacity: 0; transition: opacity 0.3s; pointer-events: none; }
-            #hl-palette { position: fixed; top: 80px; left: 50%; transform: translateX(-50%); background: rgba(30, 30, 30, 0.95); backdrop-filter: blur(20px); -webkit-backdrop-filter: blur(20px); padding: 15px 25px; border-radius: 50px; display: flex; gap: 20px; z-index: 9999999; opacity: 0; visibility: hidden; transition: opacity 0.2s; border: 1px solid rgba(255,255,255,0.2); }
-            .hl-dot { width: 24px; height: 24px; border-radius: 50%; border: 2px solid transparent; transition: all 0.2s; }
-            .hl-dot.active { transform: scale(1.4); border-color: #fff; box-shadow: 0 0 15px var(--dot-color); }
-        `;
         const styleSheet = document.createElement("style");
         styleSheet.id = styleId;
-        styleSheet.innerText = css;
+        styleSheet.innerText = `.safari-hl { color: #000 !important; background-color: var(--hl-color) !important; display: inline !important; position: relative; z-index: 10; }
+        .hl-toast { position: fixed; top: 40px; left: 50%; transform: translateX(-50%); background: #1d1d1f; color: white; padding: 10px 20px; border-radius: 25px; font-family: -apple-system; font-size: 14px; z-index: 9999999; opacity: 0; transition: opacity 0.3s; pointer-events: none; }
+        #hl-palette { position: fixed; top: 80px; left: 50%; transform: translateX(-50%); background: rgba(30, 30, 30, 0.95); backdrop-filter: blur(20px); -webkit-backdrop-filter: blur(20px); padding: 15px 25px; border-radius: 50px; display: flex; gap: 20px; z-index: 9999999; opacity: 0; visibility: hidden; transition: opacity 0.2s; border: 1px solid rgba(255,255,255,0.2); }
+        .hl-dot { width: 24px; height: 24px; border-radius: 50%; border: 2px solid transparent; transition: all 0.2s; }
+        .hl-dot.active { transform: scale(1.4); border-color: #fff; box-shadow: 0 0 15px var(--dot-color); }`;
         document.head.appendChild(styleSheet);
     }
 
@@ -54,57 +90,32 @@
     });
     document.body.appendChild(palette);
 
-    const updatePaletteUI = () => {
-        const dots = palette.querySelectorAll('.hl-dot');
-        dots.forEach((dot, i) => { dot.classList.toggle('active', i === colorIndex); });
-    };
-
     const highlight = () => {
         const sel = window.getSelection();
-        if (!sel.rangeCount || !sel.toString().trim()) return;
-        const range = sel.getRangeAt(0);
-        const node = range.startContainer;
-        const start = range.startOffset;
-        const end = range.endOffset;
-        const highlightNode = node.splitText(start);
-        highlightNode.splitText(end - start);
-        const span = document.createElement('span');
-        span.className = 'safari-hl';
-        span.style.setProperty('--hl-color', currentColor);
-        highlightNode.parentNode.insertBefore(span, highlightNode);
-        span.appendChild(highlightNode);
-        history.push([span]);
-        sel.removeAllRanges();
+        const text = sel.toString().trim();
+        if (sel.rangeCount && text) { applyHighlightToText(text, currentColor, true); sel.removeAllRanges(); }
     };
 
     const reverseHighlight = () => {
-        const lastBatch = history.pop();
-        if (!lastBatch) return;
-        lastBatch.forEach(span => {
-            if (span.parentNode) {
-                const p = span.parentNode;
-                while (span.firstChild) p.insertBefore(span.firstChild, span);
-                span.remove();
-                p.normalize();
-            }
-        });
+        const lb = history.pop();
+        if (lb) { lb.forEach(s => { if (s.parentNode) { const p = s.parentNode; while (s.firstChild) p.insertBefore(s.firstChild, s); s.remove(); p.normalize(); } }); saveToStorage(); }
     };
 
     const copyHighlights = () => {
-        let fullText = history.map(batch => batch.map(s => s.textContent).join('')).filter(t => t.trim()).join('\n');
-        if (!fullText) return;
-        navigator.clipboard.writeText(fullText).then(() => {
-            let t = document.querySelector('.hl-toast') || document.createElement('div');
-            t.className = 'hl-toast'; if (!t.parentNode) document.body.appendChild(t);
-            t.textContent = "Copied to Clipboard"; t.style.opacity = '1';
-            setTimeout(() => t.style.opacity = '0', 2000);
-        });
+        const content = history.map(batch => batch.map(s => s.textContent).join('').trim()).filter(t => t).join('\n\n');
+        if (content) {
+            navigator.clipboard.writeText(content).then(() => {
+                let t = document.querySelector('.hl-toast') || document.createElement('div');
+                t.className = 'hl-toast'; if (!t.parentNode) document.body.appendChild(t);
+                t.textContent = "Copied to Clipboard"; t.style.opacity = '1';
+                setTimeout(() => t.style.opacity = '0', 2000);
+            });
+        }
     };
 
     document.addEventListener('keydown', e => {
         const key = e.key.toLowerCase();
-        const activeEl = document.activeElement;
-        const isInput = (activeEl.tagName === 'INPUT' || activeEl.tagName === 'TEXTAREA' || activeEl.isContentEditable || activeEl.getAttribute('role') === 'textbox');
+        const isInput = (document.activeElement.tagName === 'INPUT' || document.activeElement.tagName === 'TEXTAREA' || document.activeElement.isContentEditable || document.activeElement.getAttribute('role') === 'textbox');
         const hasSel = window.getSelection().toString().trim().length > 0;
         if (isInput && !hasSel) return;
         if (key === 'h' && !e.metaKey && !hKeyDown) {
@@ -112,8 +123,7 @@
             if (hasSel) {
                 holdTimer = setTimeout(() => {
                     isCycling = true; palette.style.visibility = 'visible'; palette.style.opacity = '1';
-                    updatePaletteUI();
-                    cycleInterval = setInterval(() => { colorIndex = (colorIndex + 1) % colors.length; updatePaletteUI(); }, 400);
+                    cycleInterval = setInterval(() => { colorIndex = (colorIndex + 1) % colors.length; palette.querySelectorAll('.hl-dot').forEach((dot, i) => dot.classList.toggle('active', i === colorIndex)); }, 400);
                 }, 600);
             }
         }
@@ -131,4 +141,8 @@
             } else if (window.getSelection().toString().trim()) highlight();
         }
     });
+
+    const observer = new MutationObserver(() => { restoreHighlights(); });
+    observer.observe(document.body, { childList: true, subtree: true });
+    restoreHighlights();
 })();
