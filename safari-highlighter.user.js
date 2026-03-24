@@ -1,8 +1,14 @@
 // ==UserScript==
 // @name         Safari Highlighter
+// @version      1.0.0
+// @description  The Foundation - Stable Core with Gemini fixes
 // @match        *://*/*
 // @grant        none
 // ==/UserScript==
+
+/* CHANGE LOG:
+  1.0.0 - Initial stable release. Includes basic H/R/C keys and Gemini input protection.
+*/
 
 (function() {
     'use strict';
