@@ -1,12 +1,13 @@
 // ==UserScript==
 // @name         Safari Highlighter
-// @version      1.5.0
-// @description  Advanced formatting, YELLOW-GREEN-RED-BLUE, one empty line spacing, highlights delete after refreshing page
+// @version      2.0
+// @description  Advanced formatting, YELLOW-GREEN-RED-BLUE, highlights delete after refreshing page, double-click to delete
 // @match        *://*/*
 // @grant        none
 // ==/UserScript==
 
 /* CHANGE LOG:
+  2.0.0 - Advanced formatting, YELLOW-GREEN-RED-BLUE, highlights delete after refreshing page, double-click to delete
   1.5.0 - Advanced formatting, YELLOW-GREEN-RED-BLUE, one empty line spacing, highlights delete after refreshing page
   1.4.0 - Enabled nesting (highlights within highlights). Added 'isRestoring' flag to prevent infinite loops (anti-freeze).
   1.3.0 - Added Double-Click to Delete.
@@ -31,6 +32,22 @@
     let isCycling = false;
     let hKeyDown = false;
 
+    // ISOLATED DELETE FUNCTION
+    const removeHighlightBatch = (span) => {
+        const batch = history.find(b => b.includes(span));
+        if (batch) {
+            batch.forEach(s => {
+                const p = s.parentNode;
+                if (p) {
+                    while (s.firstChild) p.insertBefore(s.firstChild, s);
+                    s.remove();
+                    p.normalize();
+                }
+            });
+            history = history.filter(b => b !== batch);
+        }
+    };
+
     const styleId = 'safari-highlighter-styles';
     if (!document.getElementById(styleId)) {
         const css = `
@@ -45,6 +62,7 @@
                 vertical-align: baseline !important;
                 position: relative;
                 z-index: 10;
+                cursor: pointer;
             }
             .hl-toast {
                 position: fixed;
@@ -163,6 +181,13 @@
                 const span = document.createElement('span');
                 span.className = 'safari-hl';
                 span.style.setProperty('--hl-color', currentColor);
+                
+                // ADDED: Double click listener for deletion
+                span.addEventListener('dblclick', (e) => {
+                    e.stopPropagation();
+                    removeHighlightBatch(span);
+                });
+
                 highlightNode.parentNode.insertBefore(span, highlightNode);
                 span.appendChild(highlightNode);
                 currentBatch.push(span);
@@ -201,7 +226,7 @@
                 return text;
             })
             .filter(text => text.length > 0)
-            .join('\n\n'); // Changed to double newline for one empty line between items
+            .join('\n\n');
         
         if (!fullText) return;
         
