@@ -1,14 +1,14 @@
 // ==UserScript==
 // @name         Safari Highlighter
-// @version      1.2.0
-// @description  LocalStorage Persistence
+// @version      1.3.0
+// @description  Double-click to Delete
 // @match        *://*/*
 // @grant        none
 // ==/UserScript==
 
 /* CHANGE LOG:
-  1.2.0 - Added LocalStorage support to persist highlights across sessions.
-  1.1.0 - Updated colors to Yellow, Green, Red, Orange.
+  1.3.0 - Added Double-Click on a highlight to remove it individually.
+  1.2.0 - Added LocalStorage persistence.
 */
 
 (function() {
@@ -32,11 +32,13 @@
 
     const saveToStorage = () => {
         const data = history.map(batch => {
+            const activeSpan = batch.find(s => document.body.contains(s));
+            if (!activeSpan) return null;
             return {
-                text: batch[0]?.textContent || '',
-                color: batch[0]?.style.getPropertyValue('--hl-color')
+                text: batch.map(s => s.textContent).join(''),
+                color: activeSpan.style.getPropertyValue('--hl-color')
             };
-        });
+        }).filter(item => item !== null);
         localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
     };
 
@@ -52,6 +54,16 @@
                 const span = document.createElement('span');
                 span.className = 'safari-hl';
                 span.style.setProperty('--hl-color', color);
+                span.addEventListener('dblclick', function(e) {
+                    e.stopPropagation();
+                    const parent = span.parentNode;
+                    if (!parent) return;
+                    while (span.firstChild) parent.insertBefore(span.firstChild, span);
+                    span.remove();
+                    parent.normalize();
+                    history = history.filter(b => !b.includes(span));
+                    saveToStorage();
+                });
                 highlightNode.parentNode.insertBefore(span, highlightNode);
                 span.appendChild(highlightNode);
                 batch.push(span);
@@ -71,7 +83,7 @@
     if (!document.getElementById(styleId)) {
         const styleSheet = document.createElement("style");
         styleSheet.id = styleId;
-        styleSheet.innerText = `.safari-hl { color: #000 !important; background-color: var(--hl-color) !important; display: inline !important; position: relative; z-index: 10; }
+        styleSheet.innerText = `.safari-hl { color: #000 !important; background-color: var(--hl-color) !important; display: inline !important; cursor: pointer; position: relative; z-index: 10; }
         .hl-toast { position: fixed; top: 40px; left: 50%; transform: translateX(-50%); background: #1d1d1f; color: white; padding: 10px 20px; border-radius: 25px; font-family: -apple-system; font-size: 14px; z-index: 9999999; opacity: 0; transition: opacity 0.3s; pointer-events: none; }
         #hl-palette { position: fixed; top: 80px; left: 50%; transform: translateX(-50%); background: rgba(30, 30, 30, 0.95); backdrop-filter: blur(20px); -webkit-backdrop-filter: blur(20px); padding: 15px 25px; border-radius: 50px; display: flex; gap: 20px; z-index: 9999999; opacity: 0; visibility: hidden; transition: opacity 0.2s; border: 1px solid rgba(255,255,255,0.2); }
         .hl-dot { width: 24px; height: 24px; border-radius: 50%; border: 2px solid transparent; transition: all 0.2s; }
@@ -96,13 +108,8 @@
         if (sel.rangeCount && text) { applyHighlightToText(text, currentColor, true); sel.removeAllRanges(); }
     };
 
-    const reverseHighlight = () => {
-        const lb = history.pop();
-        if (lb) { lb.forEach(s => { if (s.parentNode) { const p = s.parentNode; while (s.firstChild) p.insertBefore(s.firstChild, s); s.remove(); p.normalize(); } }); saveToStorage(); }
-    };
-
     const copyHighlights = () => {
-        const content = history.map(batch => batch.map(s => s.textContent).join('').trim()).filter(t => t).join('\n\n');
+        const content = history.map(batch => batch.filter(span => document.body.contains(span)).map(span => span.textContent).join('').trim()).filter(t => t).join('\n\n');
         if (content) {
             navigator.clipboard.writeText(content).then(() => {
                 let t = document.querySelector('.hl-toast') || document.createElement('div');
@@ -127,8 +134,11 @@
                 }, 600);
             }
         }
-        if (key === 'r' && !e.metaKey && !hasSel) { e.preventDefault(); reverseHighlight(); }
-        if (key === 'c' && !e.metaKey && !hasSel) { e.preventDefault(); copyHighlights(); }
+        if (key === 'r' && !e.metaKey && !hasSel && history.length > 0) {
+            e.preventDefault(); const lb = history.pop();
+            if (lb) { lb.forEach(s => { if (s.parentNode) { const p = s.parentNode; while (s.firstChild) p.insertBefore(s.firstChild, s); s.remove(); p.normalize(); } }); saveToStorage(); }
+        }
+        if (key === 'c' && !e.metaKey && !hasSel && history.length > 0) { e.preventDefault(); copyHighlights(); }
     }, true);
 
     document.addEventListener('keyup', e => {
