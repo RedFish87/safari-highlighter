@@ -1,13 +1,14 @@
 // ==UserScript==
 // @name         Safari Highlighter
-// @version      1.3.0
-// @description  Double-click to Delete
+// @version      1.4.0
+// @description  Nesting Support & Anti-Freeze Logic
 // @match        *://*/*
 // @grant        none
 // ==/UserScript==
 
 /* CHANGE LOG:
-  1.3.0 - Added Double-Click on a highlight to remove it individually.
+  1.4.0 - Enabled nesting (highlights within highlights). Added 'isRestoring' flag to prevent infinite loops (anti-freeze).
+  1.3.0 - Added Double-Click to Delete.
   1.2.0 - Added LocalStorage persistence.
 */
 
@@ -20,6 +21,7 @@
         { name: 'Red', value: '#FF375F' }, 
         { name: 'Orange', value: '#FF9230' }
     ];
+    
     let colorIndex = 0;
     let currentColor = colors[colorIndex].value;
     let history = [];
@@ -27,6 +29,7 @@
     let cycleInterval = null;
     let isCycling = false;
     let hKeyDown = false;
+    let isRestoring = false; // Flag to prevent infinite loops
 
     const STORAGE_KEY = 'safari_hl_data_' + window.location.hostname;
 
@@ -42,13 +45,25 @@
         localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
     };
 
+    const restoreHighlights = () => {
+        if (isRestoring) return;
+        const saved = localStorage.getItem(STORAGE_KEY);
+        if (!saved) return;
+        isRestoring = true;
+        const highlightedData = JSON.parse(saved);
+        highlightedData.forEach(item => { if (item.text) applyHighlightToText(item.text, item.color, false); });
+        isRestoring = false;
+    };
+
     const applyHighlightToText = (targetText, color, save = true) => {
         const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT, null, false);
         let node;
         const batch = [];
         while (node = walker.nextNode()) {
             const index = node.textContent.indexOf(targetText);
-            if (index !== -1 && !node.parentNode.classList.contains('safari-hl')) {
+            const isSameColor = node.parentNode.classList.contains('safari-hl') && 
+                               node.parentNode.style.getPropertyValue('--hl-color') === color;
+            if (index !== -1 && !isSameColor) {
                 const highlightNode = node.splitText(index);
                 highlightNode.splitText(targetText.length);
                 const span = document.createElement('span');
@@ -70,13 +85,6 @@
             }
         }
         if (batch.length > 0) { history.push(batch); if (save) saveToStorage(); }
-    };
-
-    const restoreHighlights = () => {
-        const saved = localStorage.getItem(STORAGE_KEY);
-        if (!saved) return;
-        const highlightedData = JSON.parse(saved);
-        highlightedData.forEach(item => { if (item.text) applyHighlightToText(item.text, item.color, false); });
     };
 
     const styleId = 'safari-highlighter-styles';
@@ -109,7 +117,10 @@
     };
 
     const copyHighlights = () => {
-        const content = history.map(batch => batch.filter(span => document.body.contains(span)).map(span => span.textContent).join('').trim()).filter(t => t).join('\n\n');
+        const content = history.map(batch => {
+            let text = batch.filter(span => document.body.contains(span)).map(span => span.textContent).join('').trim();
+            return text.length > 0 ? text.replace(/^([^a-zA-Z]*)([a-zA-Z])/, (m, s, l) => s + l.toUpperCase()) : null;
+        }).filter(t => t).join('\n\n'); 
         if (content) {
             navigator.clipboard.writeText(content).then(() => {
                 let t = document.querySelector('.hl-toast') || document.createElement('div');
@@ -130,7 +141,9 @@
             if (hasSel) {
                 holdTimer = setTimeout(() => {
                     isCycling = true; palette.style.visibility = 'visible'; palette.style.opacity = '1';
-                    cycleInterval = setInterval(() => { colorIndex = (colorIndex + 1) % colors.length; palette.querySelectorAll('.hl-dot').forEach((dot, i) => dot.classList.toggle('active', i === colorIndex)); }, 400);
+                    cycleInterval = setInterval(() => { colorIndex = (colorIndex + 1) % colors.length; 
+                        palette.querySelectorAll('.hl-dot').forEach((dot, i) => dot.classList.toggle('active', i === colorIndex));
+                    }, 400);
                 }, 600);
             }
         }
@@ -143,16 +156,16 @@
 
     document.addEventListener('keyup', e => {
         if (e.key.toLowerCase() === 'h') {
-            hKeyDown = false; clearTimeout(holdTimer); if (cycleInterval) clearInterval(cycleInterval);
+            hKeyDown = false; clearTimeout(holdTimer); clearInterval(cycleInterval);
             if (isCycling) {
                 currentColor = colors[colorIndex].value; palette.style.opacity = '0';
-                setTimeout(() => { palette.style.visibility = 'hidden'; }, 200);
+                setTimeout(() => palette.style.visibility = 'hidden', 200);
                 isCycling = false; highlight();
             } else if (window.getSelection().toString().trim()) highlight();
         }
     });
 
-    const observer = new MutationObserver(() => { restoreHighlights(); });
+    const observer = new MutationObserver(() => { if (!isRestoring) restoreHighlights(); });
     observer.observe(document.body, { childList: true, subtree: true });
     restoreHighlights();
 })();
